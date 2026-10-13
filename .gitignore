@@ -3,3 +3,5 @@ dist/
 .vercel/
 # フォント見本 (PC のフォントの字形を含むので公開しない)
 fonts.html
+# 開発メモ (ローカル専用)
+DEV_NOTES.md
