@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "node scripts/build-web.mjs",
+  "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/fonts/(.*).ttf",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "installCommand": "npx --yes pnpm@12.3.4 install --frozen-lockfile"
+}

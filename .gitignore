@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.vercel/
+# フォント見本 (PC のフォントの字形を含むので公開しない)
+fonts.html

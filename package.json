@@ -1,0 +1,36 @@
+{
+  "name": "keychain-obj",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "keychain-obj": "./keychain.mjs"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build-web.mjs",
+    "cli": "node keychain.mjs"
+  },
+  "dependencies": {
+    "clipper-lib": "^6.4.2",
+    "earcut": "^3.2.4",
+    "fontkit": "^2.0.4",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@expo-google-fonts/dela-gothic-one": "^0.4.1",
+    "@expo-google-fonts/fredoka": "^0.4.1",
+    "@expo-google-fonts/hachi-maru-pop": "^0.4.1",
+    "@expo-google-fonts/kosugi-maru": "^0.4.1",
+    "@expo-google-fonts/lilita-one": "^0.4.1",
+    "@expo-google-fonts/m-plus-rounded-1c": "^0.4.4",
+    "@expo-google-fonts/mochiy-pop-one": "^0.4.1",
+    "@expo-google-fonts/noto-sans-jp": "^0.4.4",
+    "@expo-google-fonts/pacifico": "^0.4.1",
+    "@expo-google-fonts/rocknroll-one": "^0.4.2",
+    "@expo-google-fonts/titan-one": "^0.4.1",
+    "@expo-google-fonts/yusei-magic": "^0.4.2",
+    "@expo-google-fonts/zen-maru-gothic": "^0.4.2",
+    "esbuild": "^0.28.2"
+  }
+}
