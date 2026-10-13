@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RichEditor } from './editor.js';
 import { FontRegistry, GROUP_LABELS } from './fonts.js';
+import { ColorPicker } from './color-picker.js';
 import { DEFAULTS } from '../lib/defaults.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -39,6 +40,7 @@ const MAX_FONTS = 6; // 1 つのキーホルダーで使えるフォントの種
 
 let state = {};
 let editor;
+let textPicker;
 const fonts = new FontRegistry(document.getElementById('fontFaces'));
 
 // ---------------------------------------------------------------------------
@@ -131,58 +133,16 @@ function targetChars() {
 
 // 選択範囲 (なければ全体) にフォント / 色を適用する。
 // 全体なら既定値 (state.font / state.textColor) を変えて、文字ごとの指定を消す
-function applyToTarget(key, value, focusEditor = true) {
+function applyToTarget(key, value, focusEditor = true, kind = 'style') {
   const [s, e] = editor.targetRange();
   if (s === 0 && e === editor.chars.length) {
     state[key === 'font' ? 'font' : 'textColor'] = value;
-    editor.mapChars((c) => ({ ...c, [key]: null }));
+    editor.mapChars((c) => ({ ...c, [key]: null }), kind);
   } else {
-    editor.applyStyle({ [key]: value });
+    editor.applyStyle({ [key]: value }, kind);
   }
   if (focusEditor) editor.focus();
   updateToolbar();
-}
-
-// 色コードを #rrggbb にそろえる。「#」なし・3 桁 (#f00) も受け付ける。不正なら null
-function parseHex(v) {
-  const h = v.trim().replace(/^#/, '');
-  if (/^[0-9a-f]{3}$/i.test(h)) return '#' + [...h].map((c) => c + c).join('').toLowerCase();
-  if (/^[0-9a-f]{6}$/i.test(h)) return '#' + h.toLowerCase();
-  return null;
-}
-
-// 色コードの入力欄。Enter か入力欄から離れたときに反映する。apply(color, byEnter)
-function setupHexInput(input, preview, apply) {
-  let applied = null; // Enter で反映したあと、フォーカスが外れたときに同じ色を二重に反映しない
-  input.onfocus = () => { applied = null; };
-  const commit = (byEnter) => {
-    const c = parseHex(input.value);
-    input.classList.toggle('invalid', !c && input.value.trim() !== '');
-    if (!c || c === applied) return;
-    applied = c;
-    input.value = c;
-    preview.style.background = c;
-    apply(c, byEnter);
-  };
-  input.onkeydown = (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
-    if (e.key === 'Escape') { input.blur(); }
-  };
-  input.onchange = () => commit(false);
-  input.oninput = () => {
-    const c = parseHex(input.value);
-    input.classList.remove('invalid');
-    if (c) preview.style.background = c; // 入力中も見本の色だけは変える
-  };
-}
-
-// 入力中でなければ、色コード欄に今の色を表示する
-function showHex(input, preview, color) {
-  preview.style.background = color || 'repeating-linear-gradient(45deg, #ccc 0 3px, #fff 3px 6px)';
-  if (document.activeElement === input) return;
-  input.value = color || '';
-  input.placeholder = color ? '' : '複数の色';
-  input.classList.remove('invalid');
 }
 
 function renderPalette() {
@@ -199,7 +159,7 @@ function renderPalette() {
     b.onclick = () => applyToTarget('color', c);
     el.append(b);
   }
-  showHex($('textHex'), $('textHexPreview'), current);
+  textPicker.show(current);
 }
 
 // ツールバーの表示を、選択範囲 (なければ全体) の書式に合わせる
@@ -477,9 +437,11 @@ async function init() {
   renderSliders();
   setupSegment('plate');
 
-  setupHexInput($('textHex'), $('textHexPreview'), (c, byEnter) => applyToTarget('color', c, byEnter));
-  setupHexInput($('baseHex'), $('baseHexPreview'), (c) => set('baseColor', c));
-  showHex($('baseHex'), $('baseHexPreview'), state.baseColor);
+  // ドラッグ中の色の変更は、取り消し 1 回分にまとめる
+  textPicker = new ColorPicker($('textChip'), $('textPicker'),
+    (c, { live, byEnter }) => applyToTarget('color', c, live || byEnter, live ? 'picker' : 'style'));
+  const basePicker = new ColorPicker($('baseChip'), $('basePicker'), (c) => set('baseColor', c));
+  basePicker.show(state.baseColor);
 
   if (saved.format) $('format').value = saved.format;
   $('format').onchange = () => { state.format = $('format').value; save(); };

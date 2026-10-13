@@ -72,10 +72,11 @@ export class RichEditor {
   }
 
   // 選択範囲 (なければ全体) の書式を変える。patch: { font?, color? }
-  applyStyle(patch) {
+  // kind が 'picker' (色のドラッグ) なら、続けて変えた分は 1 回の取り消しでまとめて戻す
+  applyStyle(patch, kind = 'style') {
     const [s, e] = this.targetRange();
     if (s === e) return;
-    this.snapshot('style');
+    this.snapshot(kind);
     this.chars = this.chars.map((c, i) => (i >= s && i < e ? { ...c, ...patch } : c));
     this.render();
     this.restoreSelection();
@@ -83,8 +84,8 @@ export class RichEditor {
   }
 
   // 全文字の書式を変える (既定値に戻すときなど)
-  mapChars(fn) {
-    this.snapshot('style');
+  mapChars(fn, kind = 'style') {
+    this.snapshot(kind);
     this.chars = this.chars.map(fn);
     this.render();
     this.onChange?.();
@@ -143,9 +144,9 @@ export class RichEditor {
   // ---- 取り消し / やり直し ----
 
   snapshot(kind) {
-    // 続けて打った文字は 1 回の取り消しでまとめて戻す
+    // 続けて打った文字・続けてドラッグした色は 1 回の取り消しでまとめて戻す
     const now = Date.now();
-    const merge = kind === 'typing' && this.lastEdit.kind === 'typing' && now - this.lastEdit.time < 1000;
+    const merge = (kind === 'typing' || kind === 'picker') && this.lastEdit.kind === kind && now - this.lastEdit.time < 1000;
     this.lastEdit = { kind, time: now };
     if (merge) return;
     this.undoStack.push({ chars: this.chars.slice(), sel: this.sel.slice() });

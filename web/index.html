@@ -40,13 +40,24 @@ select[size] option { padding: 4px 6px; border-radius: 4px; }
 .seg button:last-child { border-right: 0; }
 .seg button.on { background: var(--accent); color: var(--accent-text); }
 .palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
-.swatch { width: 26px; height: 26px; border-radius: 50%; border: 1px solid #0003; cursor: pointer; padding: 0; }
+.swatch { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #0003; cursor: pointer; padding: 0; }
 .swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
-.hex { display: inline-flex; align-items: center; gap: 6px; }
+.color-chip { --chip: #fff; width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 3px; cursor: pointer;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.color-chip::after { content: ""; display: block; width: 100%; height: 100%; border-radius: 50%; border: 2px solid #fff; box-sizing: border-box;
+  background: var(--chip); }
+.color-chip[aria-expanded="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.picker { display: grid; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-bottom: 10px; }
+.picker-sv, .picker-hue { position: relative; touch-action: none; cursor: crosshair; border-radius: 6px; }
+.picker-sv { --hue: red; height: 140px; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--hue)); }
+.picker-hue { height: 14px; background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.picker-thumb { position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #0006, 0 1px 3px #0005; transform: translate(-50%, -50%); pointer-events: none; }
+.picker-hex { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .hex-preview { width: 22px; height: 22px; border-radius: 4px; border: 1px solid #0003; flex: none; }
-.hex input { width: 92px; padding: 4px 8px; font: inherit; font-family: ui-monospace, Consolas, monospace; font-size: 13px;
-  border: 1px solid var(--line); border-radius: 6px; }
-.hex input.invalid { border-color: var(--err); background: var(--err-bg); }
+.picker-hex input { width: 92px; padding: 4px 8px; font: inherit; font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
+.picker-hex input.invalid { border-color: var(--err); background: var(--err-bg); }
 .toolbar { display: grid; gap: 8px; margin-bottom: 8px; }
 .font-filter { display: flex; gap: 8px; align-items: center; }
 .font-filter input[type=search] { flex: 1; padding: 5px 8px; font-size: 13px; }
@@ -65,9 +76,7 @@ button.small:disabled { opacity: .5; cursor: default; }
 .editor:empty::before { content: "文字を入力"; color: var(--muted); text-shadow: none; }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 button.link { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; padding: 4px 0; cursor: pointer; margin-bottom: 8px; }
-.colors { display: flex; gap: 16px; }
-.colors label { display: flex; gap: 6px; align-items: center; }
-.colors input { width: 36px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; }
+.colors { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 .download { padding: 12px 18px 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .download .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .download button {
@@ -108,11 +117,9 @@ canvas { display: block; width: 100%; height: 100%; }
         <p class="note" id="fontNote" hidden></p>
         <div class="palette">
           <span id="palette" style="display:contents"></span>
-          <span class="hex" title="色コード (#rrggbb) を入力して Enter">
-            <span class="hex-preview" id="textHexPreview"></span>
-            <input id="textHex" type="text" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#e0464d">
-          </span>
+          <button class="color-chip" id="textChip" title="色を指定 (色相・色コード)" aria-expanded="false"></button>
         </div>
+        <div id="textPicker" hidden></div>
       </div>
       <div id="editor" class="editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true"></div>
       <p class="hint">文字を選択してからフォントや色を選ぶと、その部分だけ変わります（選択していないときは全体）。Enter で改行。</p>
@@ -135,11 +142,9 @@ canvas { display: block; width: 100%; height: 100%; }
         <button data-v="circle">丸</button><button data-v="ellipse">楕円</button><button data-v="capsule">カプセル</button>
       </div>
       <div id="plateFields"></div>
-      <div class="colors"><label>土台の色
-        <span class="hex" title="色コード (#rrggbb) を入力して Enter">
-          <span class="hex-preview" id="baseHexPreview"></span>
-          <input id="baseHex" type="text" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#f2f2f2">
-        </span></label></div>
+      <div class="colors">土台の色
+        <button class="color-chip" id="baseChip" title="色を指定 (色相・色コード)" aria-expanded="false"></button></div>
+      <div id="basePicker" hidden></div>
     </section>
 
     <section>
