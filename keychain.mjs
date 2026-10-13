@@ -22,14 +22,19 @@ const HELP = `使い方: node keychain.mjs <文字列> --font <フォント> [�
       --bold <mm>          文字の線を太らせる量 (負で細く)                       [${DEFAULTS.bold}]
       --spacing <mm>       文字間隔の追加量 (負で詰める)                         [${DEFAULTS.spacing}]
       --line-height <倍>   改行時の行送り (em 比)。文字列中の \\n で改行          [${DEFAULTS.lineHeight}]
-      --text-height <mm>   文字の浮き出し高さ                                    [${DEFAULTS.textHeight}]
+      --align <揃え>       行の揃え: left (左) / center (中央) / right (右)。
+                           カンマ区切りで行ごとに指定 (例: center,left)        [${DEFAULTS.align}]
+      --text-height <mm>   文字の浮き出し高さ                                   [${DEFAULTS.textHeight}]
       --base-height <mm>   土台プレートの厚さ                                    [${DEFAULTS.baseHeight}]
       --border <mm>        文字の周りの土台のフチ幅                              [${DEFAULTS.border}]
       --plate <type>       枠の形: outline (文字の周り) / rect (四角) /
                            circle (正円) / ellipse (楕円) / capsule (カプセル)   [${DEFAULTS.plate}]
       --corner <mm>        四角の角の丸み (0 で角ばった四角)                     [${DEFAULTS.corner}]
       --smooth <割合>      外周のなめらかさ (outline のみ。0 で文字の形に近く)   [${DEFAULTS.smooth}]
-      --ring-hole <mm>     リング穴の直径 (リングは 1 行目の中心線上の左端)      [${DEFAULTS.ringHole}]
+      --ring-pos <位置>    リングの位置: left (左・上下中央) / top-left (1 行目の左) /
+                           top (上) / top-right (1 行目の右) / right (右・上下中央) [${DEFAULTS.ringPos}]
+      --ring-hole <mm>     リング穴の直径                                        [${DEFAULTS.ringHole}]
+      --ring-gap <mm>      リングの穴のふちと文字の間隔 (0 で触れる手前まで)     [${DEFAULTS.ringGap}]
       --ring-wall <mm>     リングの肉厚                                          [${DEFAULTS.ringWall}]
       --ring-fillet <mm>   リングの付け根の丸み                                  [${DEFAULTS.ringFillet}]
       --tolerance <mm>     曲線の分割精度                                        [${DEFAULTS.tolerance}]
@@ -46,7 +51,7 @@ const HELP = `使い方: node keychain.mjs <文字列> --font <フォント> [�
 const NUMERIC = {
   size: 'size', bold: 'bold', spacing: 'spacing', 'line-height': 'lineHeight', 'text-height': 'textHeight',
   'base-height': 'baseHeight', border: 'border', corner: 'corner', smooth: 'smooth', 'ring-hole': 'ringHole',
-  'ring-wall': 'ringWall', 'ring-fillet': 'ringFillet', tolerance: 'tolerance',
+  'ring-wall': 'ringWall', 'ring-fillet': 'ringFillet', 'ring-gap': 'ringGap', tolerance: 'tolerance',
 };
 
 function parseCli() {
@@ -67,6 +72,8 @@ function parseCli() {
       size: { type: 'string', short: 's' },
       ...Object.fromEntries(Object.keys(NUMERIC).filter((k) => k !== 'size').map((k) => [k, { type: 'string' }])),
       plate: { type: 'string', default: DEFAULTS.plate },
+      align: { type: 'string', default: DEFAULTS.align },
+      'ring-pos': { type: 'string', default: DEFAULTS.ringPos },
       up: { type: 'string', default: 'z' },
       color: { type: 'string' },
       'char-colors': { type: 'string' },
@@ -89,6 +96,12 @@ function parseCli() {
     return values[key];
   };
   opt.plate = oneOf('plate', ['outline', 'rect', 'circle', 'ellipse', 'capsule']);
+  opt.ringPos = oneOf('ring-pos', ['left', 'top-left', 'top', 'top-right', 'right']);
+  // 揃えは 1 つなら全行、カンマ区切りなら行ごと
+  const aligns = values.align.split(',').map((a) => a.trim());
+  for (const a of aligns) if (!['left', 'center', 'right'].includes(a)) fail(`--align は left / center / right のいずれかです: ${a}`);
+  if (aligns.length === 1) opt.align = aligns[0];
+  else opt.lineAligns = aligns;
 
   const color = (flag, v) => {
     if (!/^#[0-9a-f]{6}$/i.test(v)) fail(`--${flag} は #rrggbb 形式で指定してください: ${v}`);

@@ -66,7 +66,7 @@ button.small:disabled { opacity: .5; cursor: default; }
 .note { color: var(--muted); font-size: 12px; margin: 0; }
 .credits { font-size: 12px; color: var(--muted); text-align: center; }
 .credits a { color: inherit; }
-.toolbar .palette { margin: 0; }
+.toolbar .palette, .toolbar .seg { margin: 0; }
 .editor {
   min-height: 76px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #f6f7f9;
   font-size: 28px; line-height: 1.35; white-space: pre-wrap; word-break: break-all; outline: none;
@@ -120,9 +120,12 @@ canvas { display: block; width: 100%; height: 100%; }
           <button class="color-chip" id="textChip" title="色を指定 (色相・色コード)" aria-expanded="false"></button>
         </div>
         <div id="textPicker" hidden></div>
+        <div class="seg" id="align" title="行の揃え (選択した文字のある行。選択していないときは全部の行)">
+          <button data-v="left">左揃え</button><button data-v="center">中央揃え</button><button data-v="right">右揃え</button>
+        </div>
       </div>
       <div id="editor" class="editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true"></div>
-      <p class="hint">文字を選択してからフォントや色を選ぶと、その部分だけ変わります（選択していないときは全体）。Enter で改行。</p>
+      <p class="hint">文字を選択してからフォントや色を選ぶと、その部分だけ変わります（選択していないときは全体）。揃えは選択した文字のある行に付きます。Enter で改行。</p>
     </section>
 
     <section>
@@ -149,6 +152,10 @@ canvas { display: block; width: 100%; height: 100%; }
 
     <section>
       <h2>リング</h2>
+      <div class="seg" id="ringPos" title="リングの位置">
+        <button data-v="left" title="左 (文字全体の上下中央)">左</button><button data-v="top-left" title="1 行目の左">左上</button><button data-v="top" title="上 (文字全体の左右中央)">上</button>
+        <button data-v="top-right" title="1 行目の右">右上</button><button data-v="right" title="右 (文字全体の上下中央)">右</button>
+      </div>
       <div id="ringFields"></div>
     </section>
 

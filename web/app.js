@@ -28,7 +28,8 @@ const SLIDERS = {
   ringFields: [
     { key: 'ringHole', label: '穴の直径', unit: 'mm', min: 2, max: 10, step: 0.5 },
     { key: 'ringWall', label: 'リングの肉厚', unit: 'mm', min: 1, max: 6, step: 0.5 },
-    { key: 'ringFillet', label: '付け根の丸み', unit: 'mm', min: 0, max: 5, step: 0.5, only: () => state.plate !== 'capsule' },
+    { key: 'ringGap', label: '穴と文字の間隔', unit: 'mm', min: 0, max: 12, step: 0.1, hint: '0 で穴が文字に触れる手前' },
+    { key: 'ringFillet', label: '付け根の丸み', unit: 'mm', min: 0, max: 5, step: 0.5 },
   ],
 };
 
@@ -117,6 +118,7 @@ function set(key, value) {
 const cssFontFamily = (id) => fonts.cssFamily(id);
 
 function syncStateFromEditor() {
+  state.lineAligns = shiftLineAligns(state.text, editor.text, state.lineAligns);
   state.text = editor.text;
   state.charFonts = editor.chars.map((c) => c.font);
   state.charColors = editor.chars.map((c) => c.color);
@@ -145,6 +147,59 @@ function applyToTarget(key, value, focusEditor = true, kind = 'style') {
   updateToolbar();
 }
 
+// ---------------------------------------------------------------------------
+// 行の揃え
+//   state.lineAligns: i 行目の揃え ('left' | 'center' | 'right')。null は既定 (state.align)
+// ---------------------------------------------------------------------------
+
+const lineOf = (k) => editor.chars.slice(0, k).filter((c) => c.ch === '\n').length;
+const lineCount = () => lineOf(editor.chars.length) + 1;
+
+// 文字列が変わったとき、行の揃えを行の増減に合わせてずらす。
+//   変わり始めた行で改行が増えたら、新しい行はその行の揃えを引き継ぐ (Word と同じ)。減ったらその行に合わせる
+function shiftLineAligns(oldText, newText, aligns) {
+  const a = [...(oldText || '')], b = [...newText];
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  const line = a.slice(0, p).filter((ch) => ch === '\n').length;
+  const delta = b.filter((ch) => ch === '\n').length - a.filter((ch) => ch === '\n').length;
+  const out = [...aligns];
+  if (delta > 0) out.splice(line + 1, 0, ...Array(delta).fill(out[line] ?? null));
+  else if (delta < 0) out.splice(line + 1, -delta);
+  return out;
+}
+
+// 選択範囲のある行 (選択していないときは全部の行)
+function targetLines() {
+  const [s, e] = editor.sel;
+  if (s === e) return null;
+  const first = lineOf(s), last = lineOf(Math.max(s, e - 1));
+  return Array.from({ length: last - first + 1 }, (_, i) => first + i);
+}
+
+function applyAlign(value) {
+  const lines = targetLines();
+  if (!lines) {
+    state.align = value;
+    state.lineAligns = [];
+  } else {
+    const aligns = [...state.lineAligns];
+    for (const i of lines) aligns[i] = value;
+    state.lineAligns = Array.from({ length: lineCount() }, (_, i) => aligns[i] ?? null);
+  }
+  save();
+  scheduleBuild();
+  editor.focus();
+  renderAlign();
+}
+
+function renderAlign() {
+  const lines = targetLines() || Array.from({ length: lineCount() }, (_, i) => i);
+  const used = new Set(lines.map((i) => state.lineAligns[i] || state.align));
+  const current = used.size === 1 ? [...used][0] : null;
+  for (const b of $('align').children) b.classList.toggle('on', b.dataset.v === current);
+}
+
 function renderPalette() {
   const el = $('palette');
   el.innerHTML = '';
@@ -166,6 +221,7 @@ function renderPalette() {
 function updateToolbar() {
   renderPalette();
   renderFontList();
+  renderAlign();
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +475,7 @@ async function init() {
   state = { ...DEFAULTS, text: 'ハシビロコウ大好き', font: DEFAULT_FONT, ...saved };
   if (!fonts.has(state.font)) state.font = DEFAULT_FONT;
   if (!Array.isArray(state.charColors)) state.charColors = [];
+  if (!Array.isArray(state.lineAligns)) state.lineAligns = [];
   // 保存されていたフォントが今は使えない (PC のフォントの許可がないなど) 場合は既定に戻す
   state.charFonts = (Array.isArray(state.charFonts) ? state.charFonts : []).map((id) => (id && fonts.has(id) ? id : null));
 
@@ -436,6 +493,11 @@ async function init() {
 
   renderSliders();
   setupSegment('plate');
+  setupSegment('ringPos');
+  for (const b of $('align').children) {
+    b.onmousedown = (e) => e.preventDefault(); // 入力欄の選択を外さない
+    b.onclick = () => applyAlign(b.dataset.v);
+  }
 
   // ドラッグ中の色の変更は、取り消し 1 回分にまとめる
   textPicker = new ColorPicker($('textChip'), $('textPicker'),
