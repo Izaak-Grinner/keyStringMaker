@@ -1,10 +1,10 @@
 {
-  "name": "keychain-obj",
+  "name": "key-string-maker",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "keychain-obj": "./keychain.mjs"
+    "key-string-maker": "./keychain.mjs"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
