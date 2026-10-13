@@ -416,7 +416,7 @@ async function init() {
   }
 
   const saved = loadSaved();
-  state = { ...DEFAULTS, text: 'ねこ', font: DEFAULT_FONT, ...saved };
+  state = { ...DEFAULTS, text: 'ハシビロコウ大好き', font: DEFAULT_FONT, ...saved };
   if (!fonts.has(state.font)) state.font = DEFAULT_FONT;
   if (!Array.isArray(state.charColors)) state.charColors = [];
   // 保存されていたフォントが今は使えない (PC のフォントの許可がないなど) 場合は既定に戻す
