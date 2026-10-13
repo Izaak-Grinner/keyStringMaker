@@ -22,10 +22,12 @@ const SLIDERS = {
   plateFields: [
     { key: 'border', label: 'フチの幅', unit: 'mm', min: 0.5, max: 15, step: 0.1 },
     { key: 'corner', label: '角の丸み', unit: 'mm', min: 0, max: 20, step: 0.5, only: () => state.plate === 'rect' },
+    { key: 'smooth', label: '外周のなめらかさ', unit: '', min: 0, max: 0.5, step: 0.05, hint: '0 で文字の形に近く', only: () => state.plate === 'outline' },
   ],
   ringFields: [
     { key: 'ringHole', label: '穴の直径', unit: 'mm', min: 2, max: 10, step: 0.5 },
     { key: 'ringWall', label: 'リングの肉厚', unit: 'mm', min: 1, max: 6, step: 0.5 },
+    { key: 'ringFillet', label: '付け根の丸み', unit: 'mm', min: 0, max: 5, step: 0.5, only: () => state.plate !== 'capsule' },
   ],
 };
 
@@ -63,7 +65,7 @@ function renderSliders() {
       label.className = 'field';
       label.dataset.key = f.key;
       label.innerHTML = `
-        <div class="field-head"><span>${f.label}</span><small>${f.hint ? f.hint + ' · ' : ''}${f.unit}</small></div>
+        <div class="field-head"><span>${f.label}</span><small>${[f.hint, f.unit].filter(Boolean).join(' · ')}</small></div>
         <div class="slider">
           <input type="range" min="${f.min}" max="${f.max}" step="${f.step}">
           <input type="number" step="${f.step}">

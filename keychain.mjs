@@ -26,10 +26,12 @@ const HELP = `使い方: node keychain.mjs <文字列> --font <フォント> [�
       --base-height <mm>   土台プレートの厚さ                                    [${DEFAULTS.baseHeight}]
       --border <mm>        文字の周りの土台のフチ幅                              [${DEFAULTS.border}]
       --plate <type>       枠の形: outline (文字の周り) / rect (四角) /
-                           circle (正円) / ellipse (楕円)                        [${DEFAULTS.plate}]
+                           circle (正円) / ellipse (楕円) / capsule (カプセル)   [${DEFAULTS.plate}]
       --corner <mm>        四角の角の丸み (0 で角ばった四角)                     [${DEFAULTS.corner}]
-      --ring-hole <mm>     リング穴の直径 (リングは左上に付く)                   [${DEFAULTS.ringHole}]
+      --smooth <割合>      外周のなめらかさ (outline のみ。0 で文字の形に近く)   [${DEFAULTS.smooth}]
+      --ring-hole <mm>     リング穴の直径 (リングは 1 行目の中心線上の左端)      [${DEFAULTS.ringHole}]
       --ring-wall <mm>     リングの肉厚                                          [${DEFAULTS.ringWall}]
+      --ring-fillet <mm>   リングの付け根の丸み                                  [${DEFAULTS.ringFillet}]
       --tolerance <mm>     曲線の分割精度                                        [${DEFAULTS.tolerance}]
       --color <#rrggbb>    文字の色                                              [${DEFAULTS.textColor}]
       --char-colors <list> 文字ごとの色をカンマ区切りで (空欄は --color の色)
@@ -43,8 +45,8 @@ const HELP = `使い方: node keychain.mjs <文字列> --font <フォント> [�
 // CLI オプション名 → DEFAULTS のキー (数値)
 const NUMERIC = {
   size: 'size', bold: 'bold', spacing: 'spacing', 'line-height': 'lineHeight', 'text-height': 'textHeight',
-  'base-height': 'baseHeight', border: 'border', corner: 'corner', 'ring-hole': 'ringHole',
-  'ring-wall': 'ringWall', tolerance: 'tolerance',
+  'base-height': 'baseHeight', border: 'border', corner: 'corner', smooth: 'smooth', 'ring-hole': 'ringHole',
+  'ring-wall': 'ringWall', 'ring-fillet': 'ringFillet', tolerance: 'tolerance',
 };
 
 function parseCli() {
@@ -86,7 +88,7 @@ function parseCli() {
     if (!choices.includes(values[key])) fail(`--${key} は ${choices.join(' / ')} のいずれかです: ${values[key]}`);
     return values[key];
   };
-  opt.plate = oneOf('plate', ['outline', 'rect', 'circle', 'ellipse']);
+  opt.plate = oneOf('plate', ['outline', 'rect', 'circle', 'ellipse', 'capsule']);
 
   const color = (flag, v) => {
     if (!/^#[0-9a-f]{6}$/i.test(v)) fail(`--${flag} は #rrggbb 形式で指定してください: ${v}`);
