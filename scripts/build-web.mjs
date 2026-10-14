@@ -73,8 +73,11 @@ ${rows.join('\n')}
 </body></html>`);
 }
 
-function copyHtml() {
-  fs.copyFileSync(path.join(WEB, 'index.html'), path.join(DIST, 'index.html'));
+// そのまま配信するファイル (llms.txt は AI エージェント向けの説明)
+const STATIC = ['index.html', 'llms.txt'];
+
+function copyStatic() {
+  for (const f of STATIC) fs.copyFileSync(path.join(WEB, f), path.join(DIST, f));
 }
 
 const jsOptions = {
@@ -91,9 +94,9 @@ export async function buildWeb({ watch = false } = {}) {
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(DIST, { recursive: true });
   buildFonts();
-  copyHtml();
+  copyStatic();
   if (watch) {
-    fs.watch(path.join(WEB, 'index.html'), () => copyHtml());
+    for (const f of STATIC) fs.watch(path.join(WEB, f), () => copyStatic());
     const ctx = await esbuild.context({ ...jsOptions, sourcemap: true });
     await ctx.watch();
     return ctx;

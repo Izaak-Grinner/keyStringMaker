@@ -4,6 +4,7 @@ import { RichEditor } from './editor.js';
 import { FontRegistry, GROUP_LABELS } from './fonts.js';
 import { ColorPicker } from './color-picker.js';
 import { DEFAULTS } from '../lib/defaults.mjs';
+import { buildPrompt, describeParams, extractJson, normalizePatch } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = 'keychain-gui';
@@ -22,8 +23,8 @@ const SLIDERS = {
   ],
   plateFields: [
     { key: 'border', label: 'フチの幅', unit: 'mm', min: 0.5, max: 15, step: 0.1 },
-    { key: 'corner', label: '角の丸み', unit: 'mm', min: 0, max: 20, step: 0.5, only: () => state.plate === 'rect' },
-    { key: 'smooth', label: '外周のなめらかさ', unit: '', min: 0, max: 0.5, step: 0.05, hint: '0 で文字の形に近く', only: () => state.plate === 'outline' },
+    { key: 'corner', label: '角の丸み', unit: 'mm', min: 0, max: 20, step: 0.5, when: '枠が四角 (rect) のときだけ', only: () => state.plate === 'rect' },
+    { key: 'smooth', label: '外周のなめらかさ', unit: '', min: 0, max: 0.5, step: 0.05, hint: '0 で文字の形に近く', when: '枠が文字の周り (outline) のときだけ', only: () => state.plate === 'outline' },
   ],
   ringFields: [
     { key: 'ringHole', label: '穴の直径', unit: 'mm', min: 2, max: 10, step: 0.5 },
@@ -42,6 +43,7 @@ const MAX_FONTS = 6; // 1 つのキーホルダーで使えるフォントの種
 let state = {};
 let editor;
 let textPicker;
+let basePicker;
 const fonts = new FontRegistry(document.getElementById('fontFaces'));
 
 // ---------------------------------------------------------------------------
@@ -96,11 +98,13 @@ function updateVisibility() {
   }
 }
 
+const segmentRefreshers = [];
 function setupSegment(id) {
   const el = $(id);
   const refresh = () => { for (const b of el.children) b.classList.toggle('on', b.dataset.v === state[id]); };
   for (const b of el.children) b.onclick = () => { set(id, b.dataset.v); refresh(); updateVisibility(); };
   refresh();
+  segmentRefreshers.push(refresh);
 }
 
 function set(key, value) {
@@ -374,16 +378,39 @@ function showModel({ meshes, size }) {
   if (!fittedRadius || Math.abs(r - fittedRadius) / fittedRadius > 0.25) fitView();
 }
 
-// 全体が収まる距離にカメラを置く
-function fitView(dir = new THREE.Vector3(0, -0.9, 1.1)) {
-  if (!lastSize) return;
+const VIEWS = { angle: new THREE.Vector3(0, -0.9, 1.1), top: new THREE.Vector3(0, -0.0001, 1) };
+
+// 全体が収まる距離に、target を見るカメラを置く。戻り値は全体の半径
+function placeCamera(cam, target, dir) {
   const r = Math.hypot(lastSize.w, lastSize.h, lastSize.t) / 2;
-  const fov = THREE.MathUtils.degToRad(camera.fov);
-  const dist = (r / Math.sin(Math.min(fov, fov * camera.aspect) / 2)) * 1.15;
-  controls.target.set(0, 0, lastSize.t / 2);
-  camera.position.copy(dir.normalize().multiplyScalar(dist)).add(controls.target);
+  const fov = THREE.MathUtils.degToRad(cam.fov);
+  const dist = (r / Math.sin(Math.min(fov, fov * cam.aspect) / 2)) * 1.15;
+  target.set(0, 0, lastSize.t / 2);
+  cam.position.copy(dir.clone().normalize().multiplyScalar(dist)).add(target);
+  cam.lookAt(target);
+  return r;
+}
+
+function fitView(dir = VIEWS.angle) {
+  if (!lastSize) return;
+  fittedRadius = placeCamera(camera, controls.target, dir);
   controls.update();
-  fittedRadius = r;
+}
+
+// プレビューの画像 (PNG の data URL)。利用者の視点は動かさず、別のカメラで決まった向きから撮る
+function capturePreview({ view = 'angle', width = 1024, height = 768 } = {}) {
+  if (!lastSize) throw new Error('まだプレビューがありません');
+  const cam = new THREE.PerspectiveCamera(camera.fov, width / height, 0.5, 5000);
+  cam.up.set(0, 0, 1);
+  placeCamera(cam, new THREE.Vector3(), VIEWS[view] || VIEWS.angle);
+  const ratio = renderer.getPixelRatio();
+  renderer.setPixelRatio(1);
+  renderer.setSize(width, height, false);
+  renderer.render(scene, cam);
+  const url = canvas.toDataURL('image/png'); // 描いた直後に読む (次の描画で消えるため)
+  renderer.setPixelRatio(ratio);
+  resize();
+  return url;
 }
 
 function resize() {
@@ -401,10 +428,18 @@ renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, came
 // ---------------------------------------------------------------------------
 
 // 生成中に入力が変わったら、終わってから最新の値でもう一度だけ生成する
-let building = false, dirty = false, buildTimer;
+let building = false, dirty = false, buildTimer = null;
+let lastBuild = null; // 最後の生成の結果 { size, missing, error }
+let buildWaiters = [];
 function scheduleBuild() {
   clearTimeout(buildTimer);
-  buildTimer = setTimeout(build, 60);
+  buildTimer = setTimeout(() => { buildTimer = null; build(); }, 60);
+}
+
+// 待っている変更がすべて生成し終わったら、その結果で resolve する
+function whenBuilt() {
+  if (!building && buildTimer === null) return Promise.resolve(lastBuild);
+  return new Promise((resolve) => buildWaiters.push(resolve));
 }
 
 async function build() {
@@ -421,14 +456,21 @@ async function build() {
     $('warn').textContent = `フォントにない文字: ${data.missing.join(' ')}`;
     $('error').hidden = true;
     $('download').disabled = false;
+    lastBuild = { size: { w: +w.toFixed(1), h: +h.toFixed(1), t: +t.toFixed(1) }, missing: data.missing, error: null };
   } catch (e) {
     $('error').textContent = e.message;
     $('error').hidden = false;
     $('download').disabled = true;
+    lastBuild = { size: null, missing: [], error: e.message };
   } finally {
     building = false;
     $('busy').hidden = true;
     if (dirty) build();
+    else if (buildTimer === null) {
+      const waiters = buildWaiters;
+      buildWaiters = [];
+      for (const resolve of waiters) resolve(lastBuild);
+    }
   }
 }
 
@@ -455,6 +497,164 @@ async function download() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'ダウンロード';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI で調整
+//   チャット型: 依頼文と画像をコピー → AI の返答を貼り付けて反映
+//   エージェント型: window.keychain (get / set / preview …) か、URL の ?s=<JSON>
+//   どちらも applyParams で検証してから state に入れる
+// ---------------------------------------------------------------------------
+
+const NUMBER_FIELDS = Object.values(SLIDERS).flat();
+const aiUndoStack = []; // AI で変える前の state
+
+const fontName = (id) => (id ? fonts.get(id)?.name ?? id : null);
+
+// フォント id か名前 (完全一致 → 前方・部分一致) から id を探す
+function resolveFont(v) {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  if (fonts.has(v)) return v;
+  const q = v.trim().toLowerCase();
+  const hit = fonts.list.find((f) => f.name.toLowerCase() === q || f.family?.toLowerCase() === q)
+    || fonts.list.find((f) => `${f.name} ${f.family}`.toLowerCase().includes(q));
+  return hit?.id ?? null;
+}
+
+// AI に渡す設定。フォントは id ではなく名前にし、空の文字ごと・行ごとの指定は省く
+function exportSettings() {
+  const out = { text: state.text, font: fontName(state.font) };
+  for (const key of Object.keys(DEFAULTS)) if (key !== 'tolerance') out[key] = state[key];
+  out.charFonts = state.charFonts.map(fontName);
+  for (const key of ['charFonts', 'charColors', 'lineAligns']) if (!out[key]?.some(Boolean)) delete out[key];
+  return out;
+}
+
+// state を丸ごと入れ替えて、画面の表示をそろえる
+function replaceState(next) {
+  const textChanged = ['text', 'charFonts', 'charColors'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(state[k]));
+  if (textChanged) editor.snapshot('ai'); // 文字の変更は入力欄の Ctrl+Z でも戻せるように
+  state = next;
+  if (textChanged) editor.setContent(state.text, state.charFonts, state.charColors);
+  $('filename').placeholder = defaultFilename();
+  renderSliders();
+  for (const refresh of segmentRefreshers) refresh();
+  basePicker.show(state.baseColor);
+  updateToolbar();
+  $('aiUndo').disabled = !aiUndoStack.length;
+  save();
+  scheduleBuild();
+}
+
+function applyParams(patch) {
+  const { changes, applied, warnings } = normalizePatch(patch, { numbers: NUMBER_FIELDS, resolveFont, fontName, current: state });
+  if (Object.keys(changes).length) {
+    aiUndoStack.push(structuredClone(state));
+    if (aiUndoStack.length > 30) aiUndoStack.shift();
+    replaceState({ ...state, ...changes });
+  }
+  return { applied, warnings };
+}
+
+function undoAi() {
+  if (!aiUndoStack.length) return false;
+  replaceState(aiUndoStack.pop());
+  aiNote('AI で変える前に戻しました');
+  return true;
+}
+
+function aiNote(text, isError = false) {
+  const el = $('aiResult');
+  el.textContent = text;
+  el.classList.toggle('err', isError);
+  el.hidden = !text;
+}
+
+function showApplyResult({ applied, warnings }) {
+  aiNote([
+    applied.length ? `反映しました:\n${applied.map((s) => `・${s}`).join('\n')}` : '変わった項目はありませんでした',
+    ...(warnings.length ? [`注意:\n${warnings.map((s) => `・${s}`).join('\n')}`] : []),
+  ].join('\n'));
+}
+
+function aiPrompt() {
+  const used = new Set([state.font, ...state.charFonts.filter(Boolean)]);
+  const fontNames = fonts.list.filter((f) => f.source === 'bundled' || used.has(f.id)).map((f) => f.name);
+  return buildPrompt({
+    settings: exportSettings(),
+    params: describeParams(NUMBER_FIELDS),
+    fontNames,
+    moreFonts: fonts.list.some((f) => f.source === 'local'),
+  });
+}
+
+const dataUrlToBlob = (url) => fetch(url).then((r) => r.blob());
+
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(aiPrompt());
+    aiNote('依頼文をコピーしました。AI のチャットに貼り付けて、最後に希望を書いてください');
+  } catch {
+    aiNote('コピーできませんでした (ブラウザがクリップボードへの書き込みを許可していません)', true);
+  }
+}
+
+async function copyImage() {
+  try {
+    // Safari はクリック直後に ClipboardItem を作る必要があるので、中身は Promise で渡す
+    const png = whenBuilt().then(() => dataUrlToBlob(capturePreview()));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+    aiNote('プレビュー画像をコピーしました。AI のチャットに貼り付けてください');
+  } catch {
+    // コピーできないブラウザでは画像として保存する
+    try {
+      const a = document.createElement('a');
+      a.href = capturePreview();
+      a.download = `${defaultFilename()}-preview.png`;
+      a.click();
+      aiNote('画像をコピーできなかったので、ファイルとして保存しました。AI のチャットに添付してください');
+    } catch (e) {
+      aiNote(`画像を作れませんでした: ${e.message}`, true);
+    }
+  }
+}
+
+function applyReply() {
+  try {
+    showApplyResult(applyParams(extractJson($('aiReply').value)));
+  } catch (e) {
+    aiNote(e.message, true);
+  }
+}
+
+// エージェント型 AI 向けの入口 (このページの JavaScript から呼ぶ)
+function exposeAgentApi() {
+  const result = async (r) => ({ ...r, ...(await whenBuilt()) });
+  window.keychain = {
+    help: '文字キーホルダーの設定を変える API。get() で今の設定、spec() で設定できる項目、'
+      + 'set({...変更する項目}) で反映 (生成が終わるまで待って結果を返す)、preview({ view: "angle" | "top" }) で PNG の data URL、undo() で直前の set を取り消し',
+    get: () => exportSettings(),
+    spec: () => describeParams(NUMBER_FIELDS),
+    fonts: () => fonts.list.map((f) => f.name),
+    set: (patch) => result(applyParams(patch)),
+    undo: () => result({ undone: undoAi() }),
+    preview: async (opts) => { await whenBuilt(); return capturePreview(opts); },
+    prompt: () => aiPrompt(),
+  };
+}
+
+// URL の ?s=<JSON> の設定で始める (AI が返したリンクや共有リンク)
+function applyUrlSettings() {
+  const url = new URL(location.href);
+  const s = url.searchParams.get('s');
+  if (s === null) return;
+  url.searchParams.delete('s');
+  history.replaceState(null, '', url);
+  try {
+    showApplyResult(applyParams(JSON.parse(s)));
+  } catch (e) {
+    aiNote(`URL の設定を読めませんでした: ${e.message}`, true);
   }
 }
 
@@ -502,17 +702,24 @@ async function init() {
   // ドラッグ中の色の変更は、取り消し 1 回分にまとめる
   textPicker = new ColorPicker($('textChip'), $('textPicker'),
     (c, { live, byEnter }) => applyToTarget('color', c, live || byEnter, live ? 'picker' : 'style'));
-  const basePicker = new ColorPicker($('baseChip'), $('basePicker'), (c) => set('baseColor', c));
+  basePicker = new ColorPicker($('baseChip'), $('basePicker'), (c) => set('baseColor', c));
   basePicker.show(state.baseColor);
 
   if (saved.format) $('format').value = saved.format;
   $('format').onchange = () => { state.format = $('format').value; save(); };
   $('download').onclick = download;
   $('viewReset').onclick = () => fitView();
-  $('viewTop').onclick = () => fitView(new THREE.Vector3(0, -0.0001, 1));
+  $('viewTop').onclick = () => fitView(VIEWS.top);
+
+  $('aiPrompt').onclick = copyPrompt;
+  $('aiImage').onclick = copyImage;
+  $('aiApply').onclick = applyReply;
+  $('aiUndo').onclick = undoAi;
+  exposeAgentApi();
 
   updateToolbar();
-  build();
+  applyUrlSettings();
+  scheduleBuild();
 }
 
 init();

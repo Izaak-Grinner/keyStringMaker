@@ -92,6 +92,13 @@ canvas { display: block; width: 100%; height: 100%; }
 .view-buttons { position: absolute; right: 16px; bottom: 16px; display: flex; gap: 8px; }
 .view-buttons button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
 .busy { position: absolute; right: 16px; top: 16px; color: var(--muted); font-size: 13px; }
+.ai-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+#aiReply { font-size: 13px; min-height: 72px; }
+#aiResult { white-space: pre-wrap; margin-bottom: 8px; }
+#aiResult.err { color: var(--err); }
+.agent-note { color: var(--muted); font-size: 12px; }
+.agent-note summary { cursor: pointer; }
+.agent-note code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
 [hidden] { display: none !important; }
 @media (max-width: 760px) {
   body { grid-template-columns: 1fr; grid-template-rows: 45vh auto; }
@@ -157,6 +164,25 @@ canvas { display: block; width: 100%; height: 100%; }
         <button data-v="top-right" title="1 行目の右">右上</button><button data-v="right" title="右 (文字全体の上下中央)">右</button>
       </div>
       <div id="ringFields"></div>
+    </section>
+
+    <section>
+      <h2>AI で調整</h2>
+      <p class="note">ChatGPT・Gemini・Claude などのチャットに、依頼文とプレビュー画像を貼って相談できます。AI の返答を下に貼り付けると反映されます。</p>
+      <div class="ai-buttons">
+        <button class="small" id="aiPrompt" title="いまの設定と、設定できる項目の説明をコピーします">① 依頼文をコピー</button>
+        <button class="small" id="aiImage" title="いまのプレビューを画像としてコピーします">② プレビュー画像をコピー</button>
+      </div>
+      <textarea id="aiReply" placeholder="③ AI の返答をそのまま貼り付け" spellcheck="false"></textarea>
+      <div class="ai-buttons">
+        <button class="small" id="aiApply">反映</button>
+        <button class="small" id="aiUndo" disabled title="AI で変える前の設定に戻します">元に戻す</button>
+      </div>
+      <p class="note" id="aiResult" role="status" hidden></p>
+      <details class="agent-note">
+        <summary>AI エージェント向け</summary>
+        <p>このページの JavaScript から <code>keychain.set({"border": 4})</code> で設定を変え、<code>keychain.preview()</code> でプレビュー画像 (PNG の data URL) を取れます。<code>keychain.help</code> と <a href="llms.txt" target="_blank">llms.txt</a> に説明があります。URL に <code>?s=</code> と設定の JSON を付けて開くこともできます。</p>
+      </details>
     </section>
 
   </div>
