@@ -5,7 +5,7 @@ import { FontRegistry, GROUP_LABELS } from './fonts.js';
 import { ColorPicker } from './color-picker.js';
 import { DEFAULTS } from '../lib/defaults.mjs';
 import {
-  buildPrompt, buildSettingsUpdate, CHOICES, describeParams, extractJson, isSettingParam, labelOf, normalizePatch, parseQuery,
+  ALIASES, buildPrompt, buildSettingsUpdate, CHOICES, describeParams, extractJson, isSettingParam, labelOf, normalizePatch, parseQuery,
 } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
@@ -551,7 +551,8 @@ function exportSettings() {
   return out;
 }
 
-// いまの設定を開くリンク (既定と違う項目だけ。文字ごとの指定はカンマ区切り)
+// いまの設定を開くリンク (既定と違う項目だけ。文字ごとの指定はカンマ区切り)。
+// fresh=1 を付けて、開いた側では保存されていた設定ではなく既定から始める (書いていない項目が既定になる)
 function settingsLink() {
   const url = new URL(location.pathname, location.origin);
   const defaults = { ...DEFAULTS, font: fontName(DEFAULT_FONT) };
@@ -559,7 +560,16 @@ function settingsLink() {
     if (key !== 'text' && JSON.stringify(v) === JSON.stringify(defaults[key])) continue;
     url.searchParams.set(key, Array.isArray(v) ? v.map((x) => x ?? '').join(',') : v);
   }
+  url.searchParams.set('fresh', '1');
   return url.href;
+}
+
+// 既定の設定に戻す patch (文字はそのまま)。文字ごと・行ごとの指定は、指定があるときだけ消す
+function defaultsPatch() {
+  const out = { font: fontName(DEFAULT_FONT), charFonts: [] };
+  for (const key of Object.keys(DEFAULTS)) if (key !== 'tolerance') out[key] = DEFAULTS[key];
+  for (const key of ['charFonts', 'charColors', 'lineAligns']) if (!state[key]?.some(Boolean)) delete out[key];
+  return out;
 }
 
 // 値が同じか。文字ごと・行ごとの指定は、後ろの null の有無を区別しない
@@ -817,17 +827,23 @@ function exposeAgentApi() {
 // URL の設定で始める (AI が返したリンクや共有リンク)
 //   ?s=<JSON> / ?text=ねこ&plate=capsule (項目名か短い別名) … 設定
 //   ?view=angle | top … プレビューを画面いっぱいに出す
+//   &fresh=1 … 既定の設定から始める (link() の URL)。ないときは、いまの設定に URL の項目だけを上書きする
 function applyUrlSettings() {
   const url = new URL(location.href);
   const view = url.searchParams.get('view');
   if (view !== null) setBigPreview(true, view);
-  const names = [...new Set(url.searchParams.keys())].filter((n) => isSettingParam(n, KNOWN_KEYS));
+  const names = [...new Set(url.searchParams.keys())].filter((n) => n === 'fresh' || isSettingParam(n, KNOWN_KEYS));
   if (!names.length) return;
   const params = new URLSearchParams(url.searchParams);
   for (const n of names) url.searchParams.delete(n);
   history.replaceState(null, '', url);
   try {
-    showApplyResult(applyParams(parseQuery(params, KNOWN_KEYS)));
+    let patch = parseQuery(params, KNOWN_KEYS);
+    if (params.has('fresh')) {
+      // 別名 (?s= の中の "bc" など) を項目名にそろえてから、既定の上に重ねる
+      patch = { ...defaultsPatch(), ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [ALIASES[k] ?? k, v])) };
+    }
+    showApplyResult(applyParams(patch));
   } catch (e) {
     aiNote(`URL の設定を読めませんでした: ${e.message}`, true);
   }

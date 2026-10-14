@@ -14,12 +14,15 @@ AI エージェントは、画面のスライダーなどを操作しなくて�
 - `await keychain.bigPreview(true, { view: "angle" })` … プレビューを画面いっぱいに表示する (自分のスクリーンショットで見た目を確かめるとき)。`bigPreview(false)` で戻す
 - `await keychain.download("3mf")` … ファイルを保存する。形式は "3mf" (おすすめ・色ごとに別パーツ) / "stl" / "obj" / "obj-y" (Y-up)。`{ filename, bytes }` を返す
 - `await keychain.undo()` … 直前の set を取り消す (set で変えた項目のうち、そのあと画面で変えられていないものだけ戻す)
-- `keychain.link()` … いまの設定を開く URL
+- `keychain.link()` … いまの設定を開く URL (どのブラウザで開いても同じデザインになる)
 - `keychain.prompt()` … チャット型 AI 向けの依頼文 (項目の説明と、いまの設定を含む)
 
 ## URL で設定を渡す (JavaScript を実行できないとき)
 
 項目をそのまま URL のパラメーターにして開くと、その設定で始まる。読んだパラメーターは URL から消える。
+
+- 書いた項目だけを、そのブラウザのいまの設定に上書きする (書いていない項目はそのまま)
+- `&fresh=1` を付けると既定の設定から始める (書いていない項目は既定値になる)。`keychain.link()` の URL には付いている
 
 - 例: `https://keystringmaker.vercel.app/?text=ねこ&plate=capsule&border=4&bc=ffcc00`
 - 改行は `%0A` (または `
