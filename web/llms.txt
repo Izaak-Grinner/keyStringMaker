@@ -9,8 +9,8 @@ AI エージェントは、画面のスライダーなどを操作しなくて�
 - `keychain.get()` … いまの設定 (JSON)
 - `keychain.spec()` … 設定できる項目 (キー・意味・単位・範囲・選択肢)
 - `keychain.fonts()` … 使えるフォント名
-- `await keychain.set({ "border": 4, "ringPos": "top" })` … 変更する項目だけを渡す。生成が終わるまで待ち、`{ applied, warnings, size: { w, h, t }, missing, error }` を返す。範囲外の値は範囲内に丸め、知らない項目は無視して warnings に書く
-- `await keychain.preview({ view: "angle" })` … プレビューの PNG (data URL)。view は "angle" (斜め上) か "top" (真上)
+- `await keychain.set({ "border": 4, "ringPos": "top" })` … 変更する項目だけを渡す。生成が終わるまで待ち、`{ applied, warnings, size: { w, h, t }, missing, error }` を返す。範囲外の値は範囲内に丸め、知らない項目は無視して warnings に書く。できあがりの幅か高さが 180mm を超えたときも warnings で知らせる
+- `await keychain.preview({ view: "angle" })` … プレビューの PNG (data URL)。view は "angle" (斜め上) か "top" (真上)。それ以外はエラー
 - `await keychain.bigPreview(true, { view: "angle" })` … プレビューを画面いっぱいに表示する (自分のスクリーンショットで見た目を確かめるとき)。`bigPreview(false)` で戻す
 - `await keychain.download("3mf")` … ファイルを保存する。形式は "3mf" (おすすめ・色ごとに別パーツ) / "stl" / "obj" / "obj-y" (Y-up)。`{ filename, bytes }` を返す
 - `await keychain.undo()` … 直前の set を取り消す (set で変えた項目のうち、そのあと画面で変えられていないものだけ戻す)

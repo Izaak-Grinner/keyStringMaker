@@ -378,10 +378,16 @@ function showModel({ meshes, size }) {
   model.position.set(-size.w / 2, -size.h / 2, 0); // テーブルの中央に置く
   lastSize = size;
   const r = Math.hypot(size.w, size.h, size.t) / 2;
-  if (!fittedRadius || Math.abs(r - fittedRadius) / fittedRadius > 0.25) fitView();
+  if (!fittedRadius || Math.abs(r - fittedRadius) / fittedRadius > 0.25) fitView(viewDir);
 }
 
 const VIEWS = { angle: new THREE.Vector3(0, -0.9, 1.1), top: new THREE.Vector3(0, -0.0001, 1) };
+let viewDir = VIEWS.angle; // 最後に選んだ向き。モデルができる前に選ばれても (?view=top)、できたときにこの向きで合わせる
+
+function viewOf(view) {
+  if (!(view in VIEWS)) throw new Error(`view は ${Object.keys(VIEWS).map((v) => `"${v}"`).join(' か ')} にしてください ("${view}" は使えません)`);
+  return VIEWS[view];
+}
 
 // 全体が収まる距離に、target を見るカメラを置く。戻り値は全体の半径
 function placeCamera(cam, target, dir) {
@@ -395,6 +401,7 @@ function placeCamera(cam, target, dir) {
 }
 
 function fitView(dir = VIEWS.angle) {
+  viewDir = dir;
   if (!lastSize) return;
   fittedRadius = placeCamera(camera, controls.target, dir);
   controls.update();
@@ -405,7 +412,7 @@ function capturePreview({ view = 'angle', width = 1024, height = 768 } = {}) {
   if (!lastSize) throw new Error('まだプレビューがありません');
   const cam = new THREE.PerspectiveCamera(camera.fov, width / height, 0.5, 5000);
   cam.up.set(0, 0, 1);
-  placeCamera(cam, new THREE.Vector3(), VIEWS[view] || VIEWS.angle);
+  placeCamera(cam, new THREE.Vector3(), viewOf(view));
   const ratio = renderer.getPixelRatio();
   renderer.setPixelRatio(1);
   renderer.setSize(width, height, false);
@@ -437,6 +444,15 @@ let buildWaiters = [];
 function scheduleBuild() {
   clearTimeout(buildTimer);
   buildTimer = setTimeout(() => { buildTimer = null; build(); }, 60);
+}
+
+// 小型の 3D プリンター (A1 mini など) の造形範囲。これより大きいと載らない機種がある
+const BED_MM = 180;
+
+// 生成した大きさについての注意 (エージェントの set() などの warnings に足す)
+function sizeWarnings(size) {
+  if (!size || Math.max(size.w, size.h) <= BED_MM) return [];
+  return [`大きさ (${size.w} × ${size.h} mm) が ${BED_MM}mm を超えています。小型の 3D プリンターでは造形範囲に収まりません。文字を減らすか、size を小さくしてください`];
 }
 
 // 待っている変更がすべて生成し終わったら、その結果で resolve する
@@ -797,7 +813,11 @@ function setBigPreview(on, view) {
 
 // エージェント型 AI 向けの入口 (このページの JavaScript から呼ぶ)
 function exposeAgentApi() {
-  const result = async (r) => ({ ...r, ...(await whenBuilt()) });
+  const result = async (r) => {
+    const built = await whenBuilt();
+    const warnings = [...(r.warnings || []), ...sizeWarnings(built?.size)];
+    return { ...r, ...built, ...(warnings.length ? { warnings } : {}) };
+  };
   window.keychain = {
     help: '文字キーホルダーの設定を変える API。get() で今の設定、spec() で設定できる項目、'
       + 'set({...変更する項目}) で反映 (生成が終わるまで待って結果を返す)、preview({ view: "angle" | "top" }) で PNG の data URL、'
@@ -810,6 +830,7 @@ function exposeAgentApi() {
     undo: () => result({ undone: undoAi() }),
     preview: async (opts) => { await whenBuilt(); return capturePreview(opts); },
     bigPreview: async (on = true, { view } = {}) => {
+      if (view !== undefined) viewOf(view); // 使えない向きはここでエラーにする
       await whenBuilt();
       setBigPreview(on, view);
       return { big: on, ...lastBuild };

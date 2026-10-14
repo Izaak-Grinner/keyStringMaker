@@ -55,7 +55,9 @@ export function positionTable(text) {
 // resolveFont(名前 or id) → id | null、fontName(id) → 名前、current: いまの state
 // 戻り値 changes: state に上書きする値、applied: 変わった項目の説明、warnings: 丸めた・無視した項目の説明
 export function normalizePatch(patch, { numbers, resolveFont, fontName, current }) {
-  if (typeof patch === 'string') patch = JSON.parse(patch);
+  if (typeof patch === 'string') {
+    try { patch = JSON.parse(patch); } catch { throw new Error(`設定は {"項目": 値} の形の JSON にしてください (例: {"border": 4})。読めなかった値: ${patch}`); }
+  }
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('設定は {"項目": 値} の形の JSON にしてください');
   const changes = {}, applied = [], warnings = [];
   const numberField = new Map(numbers.map((f) => [f.key, f]));
