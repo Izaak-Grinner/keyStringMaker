@@ -11,15 +11,23 @@ AI エージェントは、画面のスライダーなどを操作しなくて�
 - `keychain.fonts()` … 使えるフォント名
 - `await keychain.set({ "border": 4, "ringPos": "top" })` … 変更する項目だけを渡す。生成が終わるまで待ち、`{ applied, warnings, size: { w, h, t }, missing, error }` を返す。範囲外の値は範囲内に丸め、知らない項目は無視して warnings に書く
 - `await keychain.preview({ view: "angle" })` … プレビューの PNG (data URL)。view は "angle" (斜め上) か "top" (真上)
-- `await keychain.undo()` … 直前の set を取り消す
+- `await keychain.bigPreview(true, { view: "angle" })` … プレビューを画面いっぱいに表示する (自分のスクリーンショットで見た目を確かめるとき)。`bigPreview(false)` で戻す
+- `await keychain.download("3mf")` … ファイルを保存する。形式は "3mf" (おすすめ・色ごとに別パーツ) / "stl" / "obj" / "obj-y" (Y-up)。`{ filename, bytes }` を返す
+- `await keychain.undo()` … 直前の set を取り消す (set で変えた項目のうち、そのあと画面で変えられていないものだけ戻す)
+- `keychain.link()` … いまの設定を開く URL
 - `keychain.prompt()` … チャット型 AI 向けの依頼文 (項目の説明と、いまの設定を含む)
 
-ダウンロードは画面の「ダウンロード」ボタンから行う。
+## URL で設定を渡す (JavaScript を実行できないとき)
 
-## URL で設定を渡す
+項目をそのまま URL のパラメーターにして開くと、その設定で始まる。読んだパラメーターは URL から消える。
 
-`https://keystringmaker.vercel.app/?s=<URL エンコードした JSON>` を開くと、その設定で始まる。
-例: `?s=%7B%22text%22%3A%22ねこ%22%2C%22plate%22%3A%22capsule%22%7D` (`{"text":"ねこ","plate":"capsule"}`)
+- 例: `https://keystringmaker.vercel.app/?text=ねこ&plate=capsule&border=4&bc=ffcc00`
+- 改行は `%0A` (または `
+`)。色は `#` を省いてよい (`ff0000`)
+- 文字ごと・行ごとの指定はカンマ区切り (`cc=,ff0000` で 2 文字目が赤) か JSON (`cc={"ね":"ff0000"}`)
+- 短い別名: t=text, f=font, lh=lineHeight, th=textHeight, bh=baseHeight, rp=ringPos, rh=ringHole, rw=ringWall, rg=ringGap, rf=ringFillet, tc=textColor, bc=baseColor, cc=charColors, cf=charFonts, la=lineAligns
+- `?s=<URL エンコードした JSON>` でもよい (例: `?s=%7B%22text%22%3A%22ねこ%22%7D`)
+- `&view=angle` (斜め上) か `&view=top` (真上) を付けると、プレビューを画面いっぱいに表示する (スクリーンショット用)
 
 ## 画面から渡す
 
@@ -33,5 +41,6 @@ AI エージェントは、画面のスライダーなどを操作しなくて�
 - plate: 枠の形 "outline" / "rect" / "circle" / "ellipse" / "capsule"、border: フチの幅、corner: 角の丸み (rect)、smooth: 外周のなめらかさ (outline)
 - ringPos: リングの位置 "left" / "top-left" / "top" / "top-right" / "right"、ringHole / ringWall / ringGap / ringFillet: 穴の直径・肉厚・文字との間隔・付け根の丸み
 - textColor / baseColor: 色 "#rrggbb"、charColors / charFonts / lineAligns: 文字ごとの色・フォント、行ごとの揃え
+  - charColors / charFonts は文字で指定できる: `{"charColors": {"ね": "#ff0000"}}` で「ね」がすべて赤 (位置を数えなくてよい)。配列なら文字列の i 番目 (改行も 1 文字)
 
 範囲などの詳細は `keychain.spec()` で確認できる。

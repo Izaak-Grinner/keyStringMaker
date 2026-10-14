@@ -18,8 +18,8 @@
 
 ChatGPT・Gemini・Claude など、自分の AI に調整を任せられます（API キーや MCP は不要）。
 
-- **チャットの AI**: 「AI で調整」欄の「依頼文をコピー」「プレビュー画像をコピー」でチャットに貼り、AI の返答を貼り付けて「反映」
-- **AI エージェント**（ブラウザを操作できるもの）: ページの JavaScript から `keychain.set({...})` で値を変え、`keychain.preview()` で画像を取得。URL の `?s=<JSON>` でも設定を渡せます。詳しくは [llms.txt](web/llms.txt)
+- **チャットの AI**: プレビューの「AI に相談」から。「依頼文をコピー」「プレビュー画像をコピー」でチャットに貼り、AI の返答を貼り付けるとすぐ反映されます（スマホでは「AI のアプリに送る」）。画面で設定を変えたあとは「いまの設定をコピー」で AI に伝えられます
+- **AI エージェント**（ブラウザを操作できるもの）: ページの JavaScript から `keychain.set({...})` で値を変え、`keychain.preview()` で画像を取得、`keychain.download("3mf")` で保存。URL のパラメーター（`?text=ねこ&plate=capsule` など）でも設定を渡せます。詳しくは [llms.txt](web/llms.txt)
 
 ## フォント
 

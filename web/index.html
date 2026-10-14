@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文字キーホルダーメーカー</title>
 <meta name="description" content="文字とフォントを選ぶだけで、3D プリンター用の文字キーホルダー (3MF / STL / OBJ) を作れます">
+<!-- AI エージェント向けの説明 (window.keychain で設定を変えられる) -->
+<link rel="alternate" type="text/plain" href="llms.txt" title="AI エージェント向けの説明 (llms.txt)">
 <style>
 :root {
   --bg: #f4f5f7; --panel: #fff; --text: #1f2328; --muted: #6a737d; --line: #e3e6ea;
@@ -99,6 +101,22 @@ canvas { display: block; width: 100%; height: 100%; }
 .agent-note { color: var(--muted); font-size: 12px; }
 .agent-note summary { cursor: pointer; }
 .agent-note code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
+#aiStale { color: var(--warn); background: var(--warn-bg); padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; }
+button.small.attention { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+#aiSection.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: #2f6fde22; } to { background: transparent; } }
+.view-buttons { align-items: flex-end; }
+.ai-open { position: relative; }
+.view-buttons #aiOpen { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+.ai-intro { position: absolute; left: 0; bottom: calc(100% + 10px); width: max-content; white-space: nowrap;
+  background: var(--text); color: #fff; font-size: 13px; padding: 8px 32px 8px 12px; border-radius: 8px; box-shadow: 0 4px 12px #0003; }
+.ai-intro::after { content: ""; position: absolute; top: 100%; left: 24px; border: 6px solid transparent; border-top-color: var(--text); }
+.view-buttons .ai-intro button { position: absolute; right: 4px; top: 4px; padding: 2px 8px; border: 0; background: none; color: #fff; font-size: 14px; }
+.big-exit { display: none; position: absolute; left: 16px; bottom: 16px; font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+body.big-preview { grid-template-columns: 1fr; grid-template-rows: 100%; }
+body.big-preview aside, body.big-preview .ai-open { display: none; }
+body.big-preview main { grid-row: 1; }
+body.big-preview .big-exit { display: block; }
 [hidden] { display: none !important; }
 @media (max-width: 760px) {
   body { grid-template-columns: 1fr; grid-template-rows: 45vh auto; }
@@ -166,22 +184,25 @@ canvas { display: block; width: 100%; height: 100%; }
       <div id="ringFields"></div>
     </section>
 
-    <section>
+    <section id="aiSection">
       <h2>AI で調整</h2>
-      <p class="note">ChatGPT・Gemini・Claude などのチャットに、依頼文とプレビュー画像を貼って相談できます。AI の返答を下に貼り付けると反映されます。</p>
+      <p class="note">ChatGPT・Gemini・Claude などのチャットに、依頼文とプレビュー画像を貼って相談できます。AI の返答を下に貼り付けると、すぐ反映されます。</p>
       <div class="ai-buttons">
         <button class="small" id="aiPrompt" title="いまの設定と、設定できる項目の説明をコピーします">① 依頼文をコピー</button>
         <button class="small" id="aiImage" title="いまのプレビューを画像としてコピーします">② プレビュー画像をコピー</button>
+        <button class="small" id="aiShare" hidden title="依頼文とプレビュー画像を、共有メニューから AI のアプリに送ります">AI のアプリに送る</button>
       </div>
-      <textarea id="aiReply" placeholder="③ AI の返答をそのまま貼り付け" spellcheck="false"></textarea>
+      <textarea id="aiReply" placeholder="③ AI の返答をそのまま貼り付け (貼り付けると反映)" spellcheck="false"></textarea>
       <div class="ai-buttons">
-        <button class="small" id="aiApply">反映</button>
-        <button class="small" id="aiUndo" disabled title="AI で変える前の設定に戻します">元に戻す</button>
+        <button class="small" id="aiApply" title="貼り付け欄を書き直したときに使います">反映</button>
+        <button class="small" id="aiUndo" disabled title="直前に AI が変えた項目を戻します (そのあと画面で変えた項目はそのまま)">元に戻す</button>
+        <button class="small" id="aiSettings" title="2 回目以降に。画面で変えた設定を、同じチャットの AI に伝えます">いまの設定をコピー</button>
       </div>
+      <p class="note stale" id="aiStale" hidden>画面で設定を変えました。続けて相談するときは「いまの設定をコピー」をチャットに貼ってください。</p>
       <p class="note" id="aiResult" role="status" hidden></p>
       <details class="agent-note">
         <summary>AI エージェント向け</summary>
-        <p>このページの JavaScript から <code>keychain.set({"border": 4})</code> で設定を変え、<code>keychain.preview()</code> でプレビュー画像 (PNG の data URL) を取れます。<code>keychain.help</code> と <a href="llms.txt" target="_blank">llms.txt</a> に説明があります。URL に <code>?s=</code> と設定の JSON を付けて開くこともできます。</p>
+        <p>このページの JavaScript から <code>keychain.set({"border": 4})</code> で設定を変え、<code>keychain.preview()</code> でプレビュー画像 (PNG の data URL) を取れます。<code>keychain.download("3mf")</code> で保存、<code>keychain.bigPreview()</code> でプレビューを画面いっぱいに表示します。<code>keychain.help</code> と <a href="llms.txt" target="_blank">llms.txt</a> に説明があります。URL に <code>?text=ねこ&amp;plate=capsule</code> のように設定を付けて開くこともできます。</p>
       </details>
     </section>
 
@@ -211,9 +232,17 @@ canvas { display: block; width: 100%; height: 100%; }
   </div>
   <div class="busy" id="busy" hidden>更新中…</div>
   <div class="view-buttons">
+    <div class="ai-open">
+      <div class="ai-intro" id="aiIntro" role="note" hidden>
+        AI に相談しながら調整できます
+        <button id="aiIntroClose" title="閉じる" aria-label="閉じる">×</button>
+      </div>
+      <button id="aiOpen" title="ChatGPT・Gemini・Claude などに相談して調整します">AI に相談</button>
+    </div>
     <button id="viewTop">真上から</button>
     <button id="viewReset">視点リセット</button>
   </div>
+  <button class="big-exit" id="bigExit" title="元の表示に戻します (Esc)">設定を表示</button>
 </main>
 
 <script type="module" src="app.js"></script>

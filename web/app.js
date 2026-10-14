@@ -4,7 +4,9 @@ import { RichEditor } from './editor.js';
 import { FontRegistry, GROUP_LABELS } from './fonts.js';
 import { ColorPicker } from './color-picker.js';
 import { DEFAULTS } from '../lib/defaults.mjs';
-import { buildPrompt, describeParams, extractJson, normalizePatch } from './ai.js';
+import {
+  buildPrompt, buildSettingsUpdate, CHOICES, describeParams, extractJson, isSettingParam, labelOf, normalizePatch, parseQuery,
+} from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = 'keychain-gui';
@@ -56,6 +58,7 @@ function loadSaved() {
 
 function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* 保存できなくても動作には影響しない */ }
+  updateAiStale();
 }
 
 // ---------------------------------------------------------------------------
@@ -477,20 +480,28 @@ async function build() {
 const defaultFilename = () =>
   (state.text || '').replace(/[\\/:*?"<>|\r\n\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'keychain';
 
+const FORMATS = ['3mf', 'stl', 'obj', 'obj-y'];
+
+// 書き出してファイルとして保存する。choice: 画面の形式の選択肢 (obj-y は Y-up の OBJ)
+async function saveModel(choice, filename) {
+  if (!FORMATS.includes(choice)) throw new Error(`形式は ${FORMATS.join(' / ')} のどれかにしてください`);
+  const format = choice === 'obj-y' ? 'obj' : choice;
+  const { bytes } = await call('export', { params: await prepare(), format, up: choice === 'obj-y' ? 'y' : 'z' });
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${filename || defaultFilename()}.${format}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  return { filename: a.download, bytes: blob.size };
+}
+
 async function download() {
   const btn = $('download');
   btn.disabled = true;
   btn.textContent = '作成中…';
   try {
-    const choice = $('format').value;
-    const format = choice === 'obj-y' ? 'obj' : choice;
-    const { bytes } = await call('export', { params: await prepare(), format, up: choice === 'obj-y' ? 'y' : 'z' });
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${$('filename').value.trim() || defaultFilename()}.${format}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    await saveModel($('format').value, $('filename').value.trim());
   } catch (e) {
     $('error').textContent = e.message;
     $('error').hidden = false;
@@ -502,13 +513,22 @@ async function download() {
 
 // ---------------------------------------------------------------------------
 // AI で調整
-//   チャット型: 依頼文と画像をコピー → AI の返答を貼り付けて反映
-//   エージェント型: window.keychain (get / set / preview …) か、URL の ?s=<JSON>
-//   どちらも applyParams で検証してから state に入れる
+//   チャット型: 依頼文と画像をコピー → AI の返答を貼り付けると反映 (スマホは共有で AI のアプリへ)
+//   エージェント型: window.keychain (get / set / preview / download …) か、URL の ?s=<JSON> / ?text=…
+//   どれも applyParams で検証してから state に入れる
 // ---------------------------------------------------------------------------
 
 const NUMBER_FIELDS = Object.values(SLIDERS).flat();
-const aiUndoStack = []; // AI で変える前の state
+// 設定できる項目 (URL のパラメーターの判定用)
+const KNOWN_KEYS = new Set(['text', 'font', ...NUMBER_FIELDS.map((f) => f.key), ...Object.keys(CHOICES),
+  'textColor', 'baseColor', 'charColors', 'charFonts', 'lineAligns']);
+const TEXT_KEYS = ['text', 'charFonts', 'charColors', 'lineAligns']; // 文字数・行数に結びついているのでまとめて戻す
+const AI_INTRO_KEY = 'keychain-ai-intro';
+
+// AI で変えた記録 { keys: 変えた項目, prev: 変える前の state, next: 変えた直後の state }。新しいものが後ろ
+const aiUndoStack = [];
+let aiKnown = null; // AI に最後に伝えた設定 (exportSettings の JSON)。画面で変えたら「いまの設定をコピー」を促す
+let aiTipShown = false;
 
 const fontName = (id) => (id ? fonts.get(id)?.name ?? id : null);
 
@@ -531,9 +551,28 @@ function exportSettings() {
   return out;
 }
 
-// state を丸ごと入れ替えて、画面の表示をそろえる
+// いまの設定を開くリンク (既定と違う項目だけ。文字ごとの指定はカンマ区切り)
+function settingsLink() {
+  const url = new URL(location.pathname, location.origin);
+  const defaults = { ...DEFAULTS, font: fontName(DEFAULT_FONT) };
+  for (const [key, v] of Object.entries(exportSettings())) {
+    if (key !== 'text' && JSON.stringify(v) === JSON.stringify(defaults[key])) continue;
+    url.searchParams.set(key, Array.isArray(v) ? v.map((x) => x ?? '').join(',') : v);
+  }
+  return url.href;
+}
+
+// 値が同じか。文字ごと・行ごとの指定は、後ろの null の有無を区別しない
+function sameValue(key, a, b) {
+  if (!TEXT_KEYS.includes(key) || key === 'text') return JSON.stringify(a) === JSON.stringify(b);
+  const n = Math.max(a?.length || 0, b?.length || 0);
+  for (let i = 0; i < n; i++) if ((a?.[i] ?? null) !== (b?.[i] ?? null)) return false;
+  return true;
+}
+
+// state を入れ替えて、画面の表示をそろえる
 function replaceState(next) {
-  const textChanged = ['text', 'charFonts', 'charColors'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(state[k]));
+  const textChanged = ['text', 'charFonts', 'charColors'].some((k) => !sameValue(k, next[k], state[k]));
   if (textChanged) editor.snapshot('ai'); // 文字の変更は入力欄の Ctrl+Z でも戻せるように
   state = next;
   if (textChanged) editor.setContent(state.text, state.charFonts, state.charColors);
@@ -542,26 +581,50 @@ function replaceState(next) {
   for (const refresh of segmentRefreshers) refresh();
   basePicker.show(state.baseColor);
   updateToolbar();
-  $('aiUndo').disabled = !aiUndoStack.length;
   save();
   scheduleBuild();
 }
 
 function applyParams(patch) {
   const { changes, applied, warnings } = normalizePatch(patch, { numbers: NUMBER_FIELDS, resolveFont, fontName, current: state });
-  if (Object.keys(changes).length) {
-    aiUndoStack.push(structuredClone(state));
+  const keys = Object.keys(changes);
+  if (keys.length) {
+    const next = { ...state, ...changes };
+    aiUndoStack.push({ keys, prev: structuredClone(state), next: structuredClone(next) });
     if (aiUndoStack.length > 30) aiUndoStack.shift();
-    replaceState({ ...state, ...changes });
+    replaceState(next);
+    $('aiUndo').disabled = false;
   }
   return { applied, warnings };
 }
 
+// 直前の AI の変更を取り消す。AI が変えた項目だけを戻し、そのあと画面で変えた項目はそのままにする
 function undoAi() {
-  if (!aiUndoStack.length) return false;
-  replaceState(aiUndoStack.pop());
-  aiNote('AI で変える前に戻しました');
-  return true;
+  const entry = aiUndoStack.pop();
+  $('aiUndo').disabled = !aiUndoStack.length;
+  if (!entry) return null;
+  const { keys, prev, next } = entry;
+  const back = {}, restored = [], skipped = [];
+  if (keys.some((k) => TEXT_KEYS.includes(k))) {
+    const labels = keys.filter((k) => TEXT_KEYS.includes(k)).map((k) => labelOf(k, NUMBER_FIELDS));
+    if (TEXT_KEYS.every((k) => sameValue(k, state[k], next[k]))) {
+      for (const k of TEXT_KEYS) back[k] = prev[k];
+      restored.push(...labels);
+    } else {
+      skipped.push(...labels);
+    }
+  }
+  for (const k of keys) {
+    if (TEXT_KEYS.includes(k)) continue;
+    if (sameValue(k, state[k], next[k])) { back[k] = prev[k]; restored.push(labelOf(k, NUMBER_FIELDS)); }
+    else skipped.push(labelOf(k, NUMBER_FIELDS));
+  }
+  if (restored.length) replaceState({ ...state, ...structuredClone(back) });
+  aiNote([
+    restored.length ? `AI で変える前に戻しました: ${restored.join('、')}` : '戻す項目はありませんでした',
+    ...(skipped.length ? [`AI のあとに画面で変えたので、そのままにしました: ${skipped.join('、')}`] : []),
+  ].join('\n'));
+  return { restored, skipped };
 }
 
 function aiNote(text, isError = false) {
@@ -572,10 +635,29 @@ function aiNote(text, isError = false) {
 }
 
 function showApplyResult({ applied, warnings }) {
+  const tip = applied.length && !aiTipShown
+    ? '次からは、同じチャットで希望を書くだけで続けられます (依頼文のコピーは不要)。画面で設定を変えたときは「いまの設定をコピー」を貼ってください'
+    : null;
+  if (tip) aiTipShown = true;
   aiNote([
     applied.length ? `反映しました:\n${applied.map((s) => `・${s}`).join('\n')}` : '変わった項目はありませんでした',
     ...(warnings.length ? [`注意:\n${warnings.map((s) => `・${s}`).join('\n')}`] : []),
+    ...(tip ? [tip] : []),
   ].join('\n'));
+}
+
+// AI に設定を伝えた (依頼文・いまの設定をコピーした、AI の返答を反映した)
+function markAiSynced() {
+  aiKnown = JSON.stringify(exportSettings());
+  updateAiStale();
+}
+
+// 画面で設定を変えて、AI の知っている設定とずれたら知らせる
+function updateAiStale() {
+  if (!editor) return;
+  const stale = aiKnown !== null && JSON.stringify(exportSettings()) !== aiKnown;
+  $('aiStale').hidden = !stale;
+  $('aiSettings').classList.toggle('attention', stale);
 }
 
 function aiPrompt() {
@@ -589,15 +671,27 @@ function aiPrompt() {
   });
 }
 
-const dataUrlToBlob = (url) => fetch(url).then((r) => r.blob());
-
-async function copyPrompt() {
+async function copyText(text, message) {
   try {
-    await navigator.clipboard.writeText(aiPrompt());
-    aiNote('依頼文をコピーしました。AI のチャットに貼り付けて、最後に希望を書いてください');
+    await navigator.clipboard.writeText(text);
+    markAiSynced();
+    aiNote(message);
   } catch {
     aiNote('コピーできませんでした (ブラウザがクリップボードへの書き込みを許可していません)', true);
   }
+}
+
+const copyPrompt = () => copyText(aiPrompt(), '依頼文をコピーしました。AI のチャットに貼り付けて、最後に希望を書いてください');
+const copySettings = () => copyText(buildSettingsUpdate({ settings: exportSettings() }),
+  'いまの設定をコピーしました。同じチャットに貼り付けて、続けて希望を書いてください');
+
+const dataUrlToBlob = (url) => fetch(url).then((r) => r.blob());
+
+// data URL → File (共有はクリック直後に呼ぶ必要があるので、await せずに作る)
+function dataUrlToFile(url, name) {
+  const [head, body] = url.split(',');
+  const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+  return new File([bytes], name, { type: head.match(/data:([^;]+)/)[1] });
 }
 
 async function copyImage() {
@@ -620,12 +714,75 @@ async function copyImage() {
   }
 }
 
+// スマホ: 依頼文とプレビュー画像を共有メニューで AI のアプリに渡す。
+// アプリによっては画像だけが届くので、依頼文はクリップボードにも入れておく
+const canShare = () => !!navigator.share && matchMedia('(pointer: coarse)').matches;
+
+async function shareToAi() {
+  const text = aiPrompt();
+  let files = [];
+  try { files = [dataUrlToFile(capturePreview(), `${defaultFilename()}-preview.png`)]; } catch { /* 画像なしで共有する */ }
+  const data = files.length && navigator.canShare?.({ text, files }) ? { text, files } : { text };
+  const copied = navigator.clipboard?.writeText(text).then(() => true, () => false) ?? Promise.resolve(false);
+  try {
+    await navigator.share(data);
+    markAiSynced();
+    aiNote(`AI のアプリに送りました。${await copied ? '依頼文が届いていなければ貼り付けてください (コピー済み)。' : ''}AI の返答は下の欄に貼り付けてください`);
+  } catch (e) {
+    if (e.name !== 'AbortError') aiNote(`共有できませんでした: ${e.message}`, true);
+  }
+}
+
 function applyReply() {
   try {
-    showApplyResult(applyParams(extractJson($('aiReply').value)));
+    showApplyResult(applyParams(extractJson($('aiReply').value, KNOWN_KEYS)));
+    markAiSynced();
   } catch (e) {
     aiNote(e.message, true);
   }
+}
+
+// 貼り付けたらすぐ反映する (元に戻せるので確認しない)。設定が見つからなければ、直して「反映」を押してもらう
+function applyPasted() {
+  setTimeout(() => {
+    try {
+      extractJson($('aiReply').value, KNOWN_KEYS);
+    } catch {
+      aiNote('貼り付けた文の中に設定 (JSON) が見つかりませんでした。AI の返答をそのまま貼り付けてください', true);
+      return;
+    }
+    applyReply();
+  });
+}
+
+// プレビューの「AI に相談」: サイドバーの「AI で調整」欄を出す
+function openAiSection() {
+  closeAiIntro();
+  const section = $('aiSection');
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  section.classList.remove('flash');
+  void section.offsetWidth; // アニメーションをやり直す
+  section.classList.add('flash');
+  $('aiPrompt').focus({ preventScroll: true });
+}
+
+// 初回だけ「AI に相談」の案内を出す
+function showAiIntro() {
+  try { if (localStorage.getItem(AI_INTRO_KEY)) return; } catch { return; }
+  $('aiIntro').hidden = false;
+}
+
+function closeAiIntro() {
+  $('aiIntro').hidden = true;
+  try { localStorage.setItem(AI_INTRO_KEY, '1'); } catch { /* 次回も出るだけ */ }
+}
+
+// プレビューを画面いっぱいに出す (エージェントが自分のスクリーンショットで見るため)
+function setBigPreview(on, view) {
+  document.body.classList.toggle('big-preview', on);
+  if (on) $('aiIntro').hidden = true;
+  resize();
+  if (on || view) fitView(VIEWS[view] || VIEWS.angle);
 }
 
 // エージェント型 AI 向けの入口 (このページの JavaScript から呼ぶ)
@@ -633,26 +790,44 @@ function exposeAgentApi() {
   const result = async (r) => ({ ...r, ...(await whenBuilt()) });
   window.keychain = {
     help: '文字キーホルダーの設定を変える API。get() で今の設定、spec() で設定できる項目、'
-      + 'set({...変更する項目}) で反映 (生成が終わるまで待って結果を返す)、preview({ view: "angle" | "top" }) で PNG の data URL、undo() で直前の set を取り消し',
+      + 'set({...変更する項目}) で反映 (生成が終わるまで待って結果を返す)、preview({ view: "angle" | "top" }) で PNG の data URL、'
+      + 'bigPreview(true, { view }) でプレビューを画面いっぱいに表示 (スクリーンショット用)、download("3mf" | "stl" | "obj" | "obj-y") でファイルを保存、'
+      + 'undo() で直前の set を取り消し、link() でいまの設定を開く URL。詳しくは /llms.txt',
     get: () => exportSettings(),
     spec: () => describeParams(NUMBER_FIELDS),
     fonts: () => fonts.list.map((f) => f.name),
     set: (patch) => result(applyParams(patch)),
     undo: () => result({ undone: undoAi() }),
     preview: async (opts) => { await whenBuilt(); return capturePreview(opts); },
+    bigPreview: async (on = true, { view } = {}) => {
+      await whenBuilt();
+      setBigPreview(on, view);
+      return { big: on, ...lastBuild };
+    },
+    download: async (format = $('format').value, { filename } = {}) => {
+      const built = await whenBuilt();
+      if (built?.error) throw new Error(built.error);
+      return saveModel(format, filename || $('filename').value.trim());
+    },
+    link: () => settingsLink(),
     prompt: () => aiPrompt(),
   };
 }
 
-// URL の ?s=<JSON> の設定で始める (AI が返したリンクや共有リンク)
+// URL の設定で始める (AI が返したリンクや共有リンク)
+//   ?s=<JSON> / ?text=ねこ&plate=capsule (項目名か短い別名) … 設定
+//   ?view=angle | top … プレビューを画面いっぱいに出す
 function applyUrlSettings() {
   const url = new URL(location.href);
-  const s = url.searchParams.get('s');
-  if (s === null) return;
-  url.searchParams.delete('s');
+  const view = url.searchParams.get('view');
+  if (view !== null) setBigPreview(true, view);
+  const names = [...new Set(url.searchParams.keys())].filter((n) => isSettingParam(n, KNOWN_KEYS));
+  if (!names.length) return;
+  const params = new URLSearchParams(url.searchParams);
+  for (const n of names) url.searchParams.delete(n);
   history.replaceState(null, '', url);
   try {
-    showApplyResult(applyParams(JSON.parse(s)));
+    showApplyResult(applyParams(parseQuery(params, KNOWN_KEYS)));
   } catch (e) {
     aiNote(`URL の設定を読めませんでした: ${e.message}`, true);
   }
@@ -713,12 +888,24 @@ async function init() {
 
   $('aiPrompt').onclick = copyPrompt;
   $('aiImage').onclick = copyImage;
+  $('aiSettings').onclick = copySettings;
+  $('aiShare').hidden = !canShare();
+  $('aiShare').onclick = shareToAi;
+  $('aiReply').addEventListener('paste', applyPasted);
   $('aiApply').onclick = applyReply;
   $('aiUndo').onclick = undoAi;
+  $('aiOpen').onclick = openAiSection;
+  $('aiIntroClose').onclick = closeAiIntro;
+  $('bigExit').onclick = () => setBigPreview(false);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('big-preview')) setBigPreview(false);
+  });
   exposeAgentApi();
+  console.info('AI エージェント向け: window.keychain で設定を変えられます (keychain.help / llms.txt)');
 
   updateToolbar();
   applyUrlSettings();
+  showAiIntro();
   scheduleBuild();
 }
 
