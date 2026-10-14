@@ -665,11 +665,18 @@ function showApplyResult({ applied, warnings }) {
     ? '次からは、同じチャットで希望を書くだけで続けられます (依頼文のコピーは不要)。画面で設定を変えたときは「いまの設定をコピー」を貼ってください'
     : null;
   if (tip) aiTipShown = true;
-  aiNote([
+  const note = (all) => [
     applied.length ? `反映しました:\n${applied.map((s) => `・${s}`).join('\n')}` : '変わった項目はありませんでした',
-    ...(warnings.length ? [`注意:\n${warnings.map((s) => `・${s}`).join('\n')}`] : []),
+    ...(all.length ? [`注意:\n${all.map((s) => `・${s}`).join('\n')}`] : []),
     ...(tip ? [tip] : []),
-  ].join('\n'));
+  ].join('\n');
+  const first = note(warnings);
+  aiNote(first);
+  // 大きさの注意は生成が終わってから足す (その間にほかの表示に変わっていたらそのまま)
+  whenBuilt().then((built) => {
+    const more = sizeWarnings(built?.size);
+    if (more.length && $('aiResult').textContent === first) aiNote(note([...warnings, ...more]));
+  });
 }
 
 // AI に設定を伝えた (依頼文・いまの設定をコピーした、AI の返答を反映した)
